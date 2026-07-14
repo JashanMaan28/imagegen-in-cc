@@ -1,0 +1,15 @@
+{
+  "name": "imagegen",
+  "displayName": "ImageGen",
+  "version": "0.1.0",
+  "description": "Generate and edit images from Claude Code using Codex CLI (no API key), OpenAI gpt-image, Google Gemini (Nano Banana), Together AI (free FLUX), or xAI Grok.",
+  "author": {
+    "name": "Jashanpreet Singh",
+    "email": "jmaan1337@gmail.com",
+    "url": "https://github.com/JashanMaan28"
+  },
+  "homepage": "https://github.com/JashanMaan28/imagegen-in-cc",
+  "repository": "https://github.com/JashanMaan28/imagegen-in-cc",
+  "license": "MIT",
+  "keywords": ["image", "image-generation", "gpt-image", "nano-banana", "flux", "codex", "gemini", "assets"]
+}
