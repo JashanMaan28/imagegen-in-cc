@@ -6,7 +6,7 @@
 
 **Generate and edit images without leaving Claude Code** — heroes, icons, illustrations, placeholders, or anything you can describe — using whichever AI provider you already have access to.
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)](https://code.claude.com/docs/en/plugins)
 [![skills.sh](https://skills.sh/b/JashanMaan28/imagegen-in-cc)](https://skills.sh/JashanMaan28/imagegen-in-cc/imagegen)
