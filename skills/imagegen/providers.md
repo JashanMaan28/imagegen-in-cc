@@ -32,5 +32,5 @@ Auto-detect order: `openai`, `gemini`, `together`, `xai`, `codex`, `gemini-cli`.
 - Editing: yes (describe the edit; reference images passed by absolute path).
 
 ## gemini-cli — Gemini CLI + nanobanana extension
-- Requires: `gemini` CLI, the nanobanana extension (`gemini extensions install https://github.com/gemini-cli-extensions/nanobanana`), and `NANOBANANA_API_KEY` (falls back to `GEMINI_API_KEY`). Note: bills through the Gemini API key — the CLI's free OAuth tier does not cover image generation, so the direct `gemini` provider is usually the better choice.
+- Requires: `gemini` CLI, a user-installed nanobanana extension, and `NANOBANANA_API_KEY` (falls back to `GEMINI_API_KEY`). This skill does not download or install CLI extensions; install and review optional extensions independently before using them. Note: bills through the Gemini API key — the CLI's free OAuth tier does not cover image generation, so the direct `gemini` provider is usually the better choice.
 - Editing: yes (first `--input` image only).
