@@ -5,13 +5,21 @@
 #   imagegen.sh detect
 #   imagegen.sh generate --prompt "..." [--output out.png] [--provider NAME]
 #                        [--size WxH] [--aspect W:H] [--quality low|medium|high]
-#                        [--input ref.png]... [--model MODEL]
+#                        [--preset hero|banner|og|card|avatar|icon|favicon]
+#                        [--style flat|photo|watercolor|3d|isometric|pixel-art|line-art|sketch|cinematic]
+#                        [--transparent] [--format png|webp|jpeg] [--max-width N] [--crop WxH]
+#                        [--variants N] [--input ref.png]... [--model MODEL]
+#   imagegen.sh placeholder --output out.png [--size WxH] [--label TEXT] [--prompt "intended prompt"]
+#   imagegen.sh history [N]
 #
 # Providers (auto-detected in this order): openai, gemini, together, xai, codex, gemini-cli
 # Configuration is via environment variables — see `imagegen.sh detect` output or README.
+# Successful generations are logged to .imagegen/history.jsonl (disable: IMAGEGEN_NO_HISTORY=1).
 set -euo pipefail
 
 PROVIDERS_ORDER="openai gemini together xai codex gemini-cli"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+POSTPROCESS="$SCRIPT_DIR/postprocess.py"
 
 log() { printf '[imagegen] %s\n' "$*" >&2; }
 die() { printf '[imagegen] error: %s\n' "$*" >&2; exit 1; }
@@ -175,6 +183,95 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# presets & styles
+# ---------------------------------------------------------------------------
+apply_preset() { # explicit flags win over preset values
+  case "$PRESET" in
+    "")      ;;
+    hero)    : "${SIZE:=1536x1024}"; : "${ASPECT:=16:9}" ;;
+    banner)  : "${SIZE:=1536x1024}"; : "${ASPECT:=21:9}" ;;
+    og)      : "${SIZE:=1536x1024}"; : "${ASPECT:=16:9}"; : "${CROP:=1200x630}" ;;
+    card)    : "${SIZE:=1024x1536}"; : "${ASPECT:=2:3}" ;;
+    avatar)  : "${SIZE:=1024x1024}"; : "${ASPECT:=1:1}" ;;
+    icon)    : "${SIZE:=1024x1024}"; : "${ASPECT:=1:1}"; TRANSPARENT=1 ;;
+    favicon) : "${SIZE:=1024x1024}"; : "${ASPECT:=1:1}"; TRANSPARENT=1; FAVICON_SET=1 ;;
+    *) die "unknown preset: $PRESET (known: hero banner og card avatar icon favicon)" ;;
+  esac
+}
+
+style_fragment() {
+  case "$STYLE" in
+    "")         ;;
+    flat)       echo "Flat 2D vector illustration style: clean geometric shapes, smooth solid colors, minimal detail, no texture, no photorealism." ;;
+    photo)      echo "Photorealistic: natural lighting, realistic materials, shallow depth of field, high dynamic range, shot on a full-frame camera." ;;
+    watercolor) echo "Watercolor painting style: soft translucent washes, visible paper texture, gentle color bleeding, hand-painted feel." ;;
+    3d)         echo "Soft 3D render style: smooth rounded forms, subtle global illumination, matte materials, studio lighting, high polish." ;;
+    isometric)  echo "Isometric 3D illustration style: 45-degree angled view, clean geometry, consistent perspective, vibrant flat shading." ;;
+    pixel-art)  echo "Pixel art style: crisp visible pixels, limited retro color palette, no anti-aliasing, 16-bit game aesthetic." ;;
+    line-art)   echo "Minimal line art style: single-weight clean black strokes, no fill or shading, generous white space." ;;
+    sketch)     echo "Hand-drawn pencil sketch style: loose expressive linework, light cross-hatching, monochrome graphite on paper." ;;
+    cinematic)  echo "Cinematic style: dramatic lighting, film color grading, anamorphic framing, moody atmosphere, high production value." ;;
+    *) die "unknown style: $STYLE (known: flat photo watercolor 3d isometric pixel-art line-art sketch cinematic)" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# history
+# ---------------------------------------------------------------------------
+history_file() { printf '%s/history.jsonl' "${IMAGEGEN_HISTORY_DIR:-.imagegen}"; }
+
+record_history() { # <type> <output-path>
+  [ -n "${IMAGEGEN_NO_HISTORY:-}" ] && return 0
+  local f; f="$(history_file)"
+  mkdir -p "$(dirname "$f")"
+  TYPE_="$1" OUTPUT_="$2" PROVIDER_="${PROVIDER:-}" PROMPT_="$PROMPT_RAW" STYLE_="$STYLE" \
+  PRESET_="$PRESET" SIZE_="$SIZE" ASPECT_="$ASPECT" QUALITY_="$QUALITY" MODEL_="$MODEL" \
+  TRANSPARENT_="${TRANSPARENT:-}" LABEL_="$LABEL" INPUTS_="$(printf '%s\n' "${INPUTS[@]-}")" \
+  python3 >> "$f" <<'PY'
+import json, os, datetime
+e = {"ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+for key, env in [("type", "TYPE_"), ("provider", "PROVIDER_"), ("prompt", "PROMPT_"),
+                 ("style", "STYLE_"), ("preset", "PRESET_"), ("size", "SIZE_"),
+                 ("aspect", "ASPECT_"), ("quality", "QUALITY_"), ("model", "MODEL_"),
+                 ("label", "LABEL_"), ("output", "OUTPUT_")]:
+    v = os.environ.get(env, "")
+    if v:
+        e[key] = v
+if os.environ.get("TRANSPARENT_"):
+    e["transparent"] = True
+inputs = [i for i in os.environ.get("INPUTS_", "").split("\n") if i]
+if inputs:
+    e["inputs"] = inputs
+print(json.dumps(e))
+PY
+}
+
+cmd_history() {
+  local f; f="$(history_file)"
+  [ -f "$f" ] || { echo "no history yet ($f)"; return 0; }
+  python3 - "$f" "${HIST_N:-10}" <<'PY'
+import sys, json
+with open(sys.argv[1]) as fh:
+    lines = fh.read().splitlines()[-int(sys.argv[2]):]
+for line in lines:
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    parts = [e.get("ts", "?"), e.get("type", "?"), e.get("provider", "-"), e.get("output", "?")]
+    extras = [f"{k}={e[k]}" for k in ("preset", "style", "size", "aspect") if e.get(k)]
+    if e.get("transparent"):
+        extras.append("transparent")
+    prompt = e.get("prompt", "")
+    if len(prompt) > 100:
+        prompt = prompt[:97] + "..."
+    print("  ".join(parts) + ("  [" + " ".join(extras) + "]" if extras else ""))
+    if prompt:
+        print("    " + prompt)
+PY
+}
+
+# ---------------------------------------------------------------------------
 # providers
 # ---------------------------------------------------------------------------
 gen_openai() {
@@ -319,14 +416,42 @@ gen_gemini_cli() {
 }
 
 # ---------------------------------------------------------------------------
+# post-processing pipeline (transparent → crop/resize/convert → favicon set)
+# ---------------------------------------------------------------------------
+post_process() { # <path> ; echoes final path
+  local out="$1"
+  if [ -n "${TRANSPARENT:-}" ]; then
+    python3 "$POSTPROCESS" transparent "$out" >&2
+  fi
+  if [ -n "${FORMAT:-}" ] || [ -n "${MAX_WIDTH:-}" ] || [ -n "${CROP:-}" ]; then
+    local final="$out"
+    [ -n "${FORMAT:-}" ] && final="${out%.*}.$FORMAT"
+    local cargs=()
+    [ -n "${MAX_WIDTH:-}" ] && cargs=("${cargs[@]}" --max-width "$MAX_WIDTH")
+    [ -n "${CROP:-}" ] && cargs=("${cargs[@]}" --crop "$CROP")
+    python3 "$POSTPROCESS" convert "$out" "$final" ${cargs[@]+"${cargs[@]}"} >&2
+    [ "$final" != "$out" ] && rm -f "$out"
+    out="$final"
+  fi
+  if [ -n "${FAVICON_SET:-}" ]; then
+    python3 "$POSTPROCESS" favicon "$out" "$(dirname "$out")" >&2
+  fi
+  printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------
 # generate command
 # ---------------------------------------------------------------------------
 cmd_generate() {
   [ -n "$PROMPT" ] || die "--prompt is required"
+  apply_preset
   if [ -z "$OUTPUT" ]; then
     OUTPUT="./imagegen-$(date +%Y%m%d-%H%M%S).png"
     log "no --output given, using $OUTPUT"
   fi
+  case "$OUTPUT" in *.png) ;; *)
+    [ -z "${TRANSPARENT:-}" ] || die "--transparent requires a .png output (add --format webp to convert after keying)"
+  esac
   local i
   for i in "${INPUTS[@]-}"; do
     [ -z "$i" ] || [ -f "$i" ] || die "input image not found: $i"
@@ -335,19 +460,54 @@ cmd_generate() {
     PROVIDER="$(pick_provider)" || die "no providers available — run 'imagegen.sh detect' for setup hints"
   fi
   available "$PROVIDER" || die "provider '$PROVIDER' not available — $(requirement_hint "$PROVIDER")"
+
+  PROMPT_RAW="$PROMPT"
+  local frag; frag="$(style_fragment)"
+  [ -n "$frag" ] && PROMPT="$PROMPT $frag"
+  [ -n "${TRANSPARENT:-}" ] && PROMPT="$PROMPT The subject must be isolated and centered on a pure solid white #FFFFFF background with no shadows, no reflections, and nothing else in the frame."
+
+  local n="${VARIANTS:-1}"
+  case "$n" in ''|*[!0-9]*) die "--variants must be a number" ;; esac
+  [ "$n" -ge 1 ] && [ "$n" -le 8 ] || die "--variants must be between 1 and 8"
+  [ "$n" -gt 1 ] && [ "$PROVIDER" = "codex" ] && log "warning: $n variants via codex will be slow (a full agent run each)"
+
   mkdir -p "$(dirname "$OUTPUT")"
   log "provider: $PROVIDER"
-  case "$PROVIDER" in
-    openai)     gen_openai ;;
-    gemini)     gen_gemini ;;
-    together)   gen_together ;;
-    xai)        gen_xai ;;
-    codex)      gen_codex ;;
-    gemini-cli) gen_gemini_cli ;;
-    *)          die "unknown provider: $PROVIDER (known: $PROVIDERS_ORDER)" ;;
-  esac
-  [ -s "$OUTPUT" ] || die "generation reported success but $OUTPUT is missing or empty"
-  printf 'OK %s %s (%s bytes)\n' "$PROVIDER" "$OUTPUT" "$(wc -c < "$OUTPUT" | tr -d ' ')"
+  local orig_output="$OUTPUT" idx=1 final
+  while [ "$idx" -le "$n" ]; do
+    OUTPUT="$orig_output"
+    [ "$n" -gt 1 ] && OUTPUT="${orig_output%.*}-$idx.${orig_output##*.}"
+    case "$PROVIDER" in
+      openai)     gen_openai ;;
+      gemini)     gen_gemini ;;
+      together)   gen_together ;;
+      xai)        gen_xai ;;
+      codex)      gen_codex ;;
+      gemini-cli) gen_gemini_cli ;;
+      *)          die "unknown provider: $PROVIDER (known: $PROVIDERS_ORDER)" ;;
+    esac
+    [ -s "$OUTPUT" ] || die "generation reported success but $OUTPUT is missing or empty"
+    final="$(post_process "$OUTPUT")"
+    record_history generate "$final"
+    printf 'OK %s %s (%s bytes)\n' "$PROVIDER" "$final" "$(wc -c < "$final" | tr -d ' ')"
+    idx=$((idx + 1))
+  done
+}
+
+# ---------------------------------------------------------------------------
+# placeholder command
+# ---------------------------------------------------------------------------
+cmd_placeholder() {
+  [ -n "$OUTPUT" ] || die "--output is required for placeholder"
+  apply_preset
+  local pargs=(placeholder "$OUTPUT" --size "${SIZE:-1024x1024}")
+  [ -n "$LABEL" ] && pargs=("${pargs[@]}" --label "$LABEL")
+  mkdir -p "$(dirname "$OUTPUT")"
+  python3 "$POSTPROCESS" "${pargs[@]}" >&2
+  PROMPT_RAW="$PROMPT"
+  PROVIDER=""
+  record_history placeholder "$OUTPUT"
+  printf 'OK placeholder %s\n' "$OUTPUT"
 }
 
 # ---------------------------------------------------------------------------
@@ -356,7 +516,13 @@ cmd_generate() {
 CMD="${1:-}"
 [ -n "$CMD" ] && shift || true
 
-PROMPT="" OUTPUT="" SIZE="" ASPECT="" QUALITY="" MODEL=""
+HIST_N=10
+if [ "$CMD" = "history" ] && [ $# -gt 0 ]; then
+  case "$1" in *[!0-9]*) ;; *) HIST_N="$1"; shift ;; esac
+fi
+
+PROMPT="" PROMPT_RAW="" OUTPUT="" SIZE="" ASPECT="" QUALITY="" MODEL=""
+PRESET="" STYLE="" TRANSPARENT="" FORMAT="" MAX_WIDTH="" CROP="" VARIANTS="" LABEL="" FAVICON_SET=""
 PROVIDER="${IMAGEGEN_PROVIDER:-}"
 INPUTS=()
 while [ $# -gt 0 ]; do
@@ -368,8 +534,16 @@ while [ $# -gt 0 ]; do
     --aspect)      ASPECT="$2"; shift 2 ;;
     --quality)     QUALITY="$2"; shift 2 ;;
     --model)       MODEL="$2"; shift 2 ;;
+    --preset)      PRESET="$2"; shift 2 ;;
+    --style)       STYLE="$2"; shift 2 ;;
+    --transparent) TRANSPARENT=1; shift ;;
+    --format)      FORMAT="$2"; shift 2 ;;
+    --max-width)   MAX_WIDTH="$2"; shift 2 ;;
+    --crop)        CROP="$2"; shift 2 ;;
+    --variants)    VARIANTS="$2"; shift 2 ;;
+    --label)       LABEL="$2"; shift 2 ;;
     --input|-i)    INPUTS[${#INPUTS[@]}]="$2"; shift 2 ;;
-    -h|--help)     sed -n '2,12p' "$0"; exit 0 ;;
+    -h|--help)     sed -n '2,17p' "$0"; exit 0 ;;
     *)             die "unknown option: $1 (see --help)" ;;
   esac
 done
@@ -377,6 +551,8 @@ done
 case "$CMD" in
   detect|providers) cmd_detect ;;
   generate|edit)    cmd_generate ;;
-  ""|-h|--help)     sed -n '2,12p' "$0" ;;
-  *)                die "unknown command: $CMD (use: detect | generate)" ;;
+  placeholder)      cmd_placeholder ;;
+  history)          cmd_history ;;
+  ""|-h|--help)     sed -n '2,17p' "$0" ;;
+  *)                die "unknown command: $CMD (use: detect | generate | placeholder | history)" ;;
 esac

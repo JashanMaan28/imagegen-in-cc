@@ -9,7 +9,7 @@
 [![Version](https://img.shields.io/badge/version-0.1.0-blue)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)](https://code.claude.com/docs/en/plugins)
-[![skills.sh](https://skills.sh/b/JashanMaan28/imagegen-in-cc)](https://skills.sh/JashanMaan28/imagegen-in-cc)
+[![skills.sh](https://skills.sh/b/JashanMaan28/imagegen-in-cc)](https://skills.sh/JashanMaan28/imagegen-in-cc/imagegen)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 
 ```
@@ -29,7 +29,7 @@
 
 Then run `/imagegen-setup` to see which providers are ready on your machine. If you have the Codex CLI and a ChatGPT account, it works immediately with **zero configuration**.
 
-**Using Codex, Cursor, or another agent?** Install just the skill (no slash commands) via [skills.sh](https://skills.sh/JashanMaan28/imagegen-in-cc):
+**Using Codex, Cursor, or another agent?** Install just the skill (no slash commands) via [skills.sh](https://skills.sh/JashanMaan28/imagegen-in-cc/imagegen):
 
 ```bash
 npx skills add JashanMaan28/imagegen-in-cc
@@ -52,8 +52,11 @@ The plugin auto-detects what's configured and picks the best option; override wi
 
 | | |
 |---|---|
-| `/imagine <prompt> [flags]` | Generate an image. Flags: `--provider`, `--size 1536x1024`, `--aspect 16:9`, `--quality high`, `--output path.png` |
+| `/imagine <prompt> [flags]` | Generate an image. Flags: `--preset`, `--style`, `--transparent`, `--provider`, `--size`, `--aspect`, `--quality`, `--format`, `--output` |
 | `/image-edit <path> <instruction>` | Edit an existing image — background swap, style change, add/remove objects |
+| `/variants <prompt> [count]` | Generate several takes, compare them, keep the best |
+| `/reimagine <file> <change>` | Regenerate a previous image with tweaks, using recorded history |
+| `/placeholder <what for>` | Instant free placeholder images; swap for real generations later |
 | `/imagegen-setup` | Check provider availability and get setup help |
 | **Automatic** | Claude invokes the `imagegen` skill on its own when a task needs image assets — *"build me a landing page with a hero image"* just works |
 
@@ -61,9 +64,21 @@ Everything runs through one script you can also use directly (or in CI):
 
 ```bash
 scripts/imagegen.sh detect
-scripts/imagegen.sh generate --prompt "isometric city at dusk" --output city.png --aspect 16:9
+scripts/imagegen.sh generate --prompt "isometric city at dusk" --output city.png --preset hero --style cinematic
+scripts/imagegen.sh generate --prompt "rocket ship logo" --output logo.png --preset icon        # transparent PNG
 scripts/imagegen.sh generate --prompt "make the sky stormy" --input city.png --output city-storm.png
+scripts/imagegen.sh generate --prompt "team mascot" --output mascot.png --variants 4
+scripts/imagegen.sh placeholder --output public/hero.png --preset hero --label "Hero"
+scripts/imagegen.sh history 10
 ```
+
+### Presets, styles & post-processing
+
+- **Size presets** — `--preset hero | banner | og | card | avatar | icon | favicon`. `og` auto-crops to exactly 1200x630; `icon` keys the background transparent; `favicon` also emits `favicon.ico`, `favicon-16/32.png`, and `apple-touch-icon.png`.
+- **Style presets** — `--style flat | photo | watercolor | 3d | isometric | pixel-art | line-art | sketch | cinematic` append curated prompt fragments for consistent aesthetics across a project.
+- **`--transparent`** — real alpha transparency on any provider (white-key + un-mix post-processing; needs Pillow).
+- **Web delivery** — `--format webp --max-width 1600` converts and resizes so you don't ship multi-MB PNGs; `--crop WxH` center-crops to exact dimensions.
+- **History** — generations are logged to `.imagegen/history.jsonl` (prompt, provider, settings, output) so images can be regenerated with tweaks later. Disable with `IMAGEGEN_NO_HISTORY=1`.
 
 ## Configuration
 
@@ -76,7 +91,7 @@ scripts/imagegen.sh generate --prompt "make the sky stormy" --input city.png --o
 | `XAI_API_KEY` / `XAI_IMAGE_MODEL` | xAI key / model (default `grok-imagine-image`) |
 | `NANOBANANA_API_KEY` | key for the gemini-cli provider (falls back to `GEMINI_API_KEY`) |
 
-Requirements: `bash`, `curl`, `python3` (all preinstalled on macOS/Linux).
+Requirements: `bash`, `curl`, `python3` (all preinstalled on macOS/Linux). Post-processing features (`--transparent`, `--format`, `--crop`, favicon sets, labeled placeholders) additionally need Pillow: `pip3 install --user pillow`.
 
 ## How it works
 
